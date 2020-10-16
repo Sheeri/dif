@@ -21,6 +21,7 @@ $defaults{perltidy}         = "$^X" . "tidy -l=110 -ce";    # perltidy location 
 $defaults{openMultipleGUIs} = 0;                            # when using option -dir2 or -gold, open all GUI windows at the same time
 $defaults{meldSizeLimit}    = 2000000;                      # switch to gvimdiff once uncompressed file size is over this limit
 my %opt;
+my $to_print='';
 
 my $scriptName = 'dif';
 
@@ -255,6 +256,8 @@ sub usage {
 
     Viewing options:
        -quiet             Do not print to screen
+
+       -filenames         Print filenames only when files differ
 
        -verbose           Print names and file sizes of preprocessed temp files, before comparing
 
@@ -623,7 +626,7 @@ if ( $defaults{history} ) {
 }
 
 # Options can be overridden with user config file ~/.dif.options  (key/value format)
-Getopt::Long::GetOptions( \%opt, 'd' => sub { $d = 1 }, 'dd' => sub { $d = 2 }, 'help|h|?', 'sort|s', 'paragraphSort', 'uniq|u', 'strings', 'fold|f', 'foldChars=s', 'trim', 'trimChars=s', 'head', 'headLines=s', 'tail', 'tailLines=s', 'fields=s', 'fieldSeparator=s', 'fieldJustify', 'ppOnly', 'white|w', 'noWhite', 'case', 'comments', 'grep=s', 'ignore=s', 'search=s', 'replace=s', 'start=s', 'stop=s', 'start1=s', 'stop1=s', 'start2=s', 'stop2=s', 'stopIgnoreLine', 'function=s', 'functionSort', 'replaceTable=s', 'replaceDates', 'round=s', 'split', 'splitChar=s', 'lsl', 'bcpp', 'perltidy', 'bin', 'externalPreprocessScript=s', 'perlDump', 'perlEval', 'yaml|yml', 'json', 'silent', 'quiet', 'verbose|v', 'gui=s', 'difftool=s', 'diff', 'gvimdiff|gv', 'tkdiff', 'kompare|k', 'meld|m', 'stdin', 'stdout', 'rp', 'ps', 'cleanup', 'gold|g', 'dir2=s', 'listFiles', 'report', 'includeFiles=s', 'excludeFiles=s', 'recursive=s', 'noDirs', 'tree', 'tartv', 'noBackgroundProcess', 'installationInstructions' ) or usage();
+Getopt::Long::GetOptions( \%opt, 'd' => sub { $d = 1 }, 'dd' => sub { $d = 2 }, 'help|h|?', 'sort|s', 'paragraphSort', 'uniq|u', 'strings', 'fold|f', 'foldChars=s', 'trim', 'trimChars=s', 'head', 'headLines=s', 'tail', 'tailLines=s', 'fields=s', 'fieldSeparator=s', 'fieldJustify', 'ppOnly', 'white|w', 'noWhite', 'case', 'comments', 'grep=s', 'ignore=s', 'search=s', 'replace=s', 'start=s', 'stop=s', 'start1=s', 'stop1=s', 'start2=s', 'stop2=s', 'stopIgnoreLine', 'function=s', 'functionSort', 'replaceTable=s', 'replaceDates', 'round=s', 'split', 'splitChar=s', 'lsl', 'bcpp', 'perltidy', 'bin', 'externalPreprocessScript=s', 'perlDump', 'perlEval', 'yaml|yml', 'json', 'silent', 'quiet', 'filenames', 'verbose|v', 'gui=s', 'difftool=s', 'diff', 'gvimdiff|gv', 'tkdiff', 'kompare|k', 'meld|m', 'stdin', 'stdout', 'rp', 'ps', 'cleanup', 'gold|g', 'dir2=s', 'listFiles', 'report', 'includeFiles=s', 'excludeFiles=s', 'recursive=s', 'noDirs', 'tree', 'tartv', 'noBackgroundProcess', 'installationInstructions' ) or usage();
 # noDirs is not in usage.  It excludes directories
 $opt{quiet}  = 1 if $opt{silent};       # for backwards compatibility of -silent
 $opt{report} = 1 if $opt{listFiles};    # for backwards compatibility of -listFiles
@@ -685,6 +688,9 @@ if ( defined $customFilenameMappings{$filePrefix} ) {
     $files[0] = "$customFilenameMappings{$filePrefix}$p4rev";
 }
 
+# Determine which md5sum tool to use
+my $md5sum_tool = (`which md5sum` or `which md5`);
+
 # Determine which diff tool to use
 # Start with $defaults{gui}, which is hard-coded or in ~/.dif.defaults
 # Next look at options -diff -gvimdiff -kompare -meld  -gui <tool>
@@ -714,17 +720,19 @@ if ( $opt{diff} ) {
 d '$gui';
 
 if ( $gui eq 'meld' ) {
-    my $meld;
     my $meld_161 = "/home/utils/meld-1.6.1/bin/meld";
     my $meld_186 = "/home/utils/meld-1.8.6/bin/meld";
+    my $meld=`which meld`;
+    chomp($meld);
     if ( -f $meld_186 ) {
         $meld = $meld_186;
     } elsif ( -f $meld_161 ) {
         $meld = $meld_161;
     } elsif ( -f '/usr/bin/meld' ) {
         $meld = '/usr/bin/meld';
+    } elsif ( -f $meld ) {  
     } else {
-        say "WARNING:  meld not found.  Using gvimdiff instead" unless $opt{quiet};
+        say "WARNING:  meld not found.  Using gvimdiff instead" if $opt{verbose};
         $meld = 'gvimdiff';
     }
     $gui = $meld;
@@ -733,7 +741,7 @@ d '$gui';
 # Fall back to gvimdiff if gui is not installed
 if ( $gui ne 'none' ) {
     if ( !whichCommand($gui) ) {
-        say "Using gvimdiff since '$gui' is not installed" unless $opt{quiet};
+        say "Using gvimdiff since '$gui' is not installed" if $opt{verbose};
         # sudo apt install kompare
         $gui = 'gvimdiff';
     }
@@ -968,23 +976,23 @@ if ( ( $opt{gold} or $opt{dir2} or defined $opt{includeFiles} ) and !$opt{report
                     push @files, $goldfile;
                 }
                 d '@files';
-                say "Comparing $files[0] with $files[1]" unless $opt{quiet};
+                say "Comparing $files[0] with $files[1]" if $opt{verbose};
             }
             if ( $opt{dir2} ) {
                 my $dir2file = toDir2( $files[0] );
                 push @files, $dir2file;
                 d '@files';
-                say "Comparing $files[0] with $files[1]" unless $opt{quiet};
+                say "Comparing $files[0] with $files[1]" if $opt{verbose};
             }
         }
     } else {
         # If more than one file was specified with -gold or -dir2, call dif multiple times with options
-        say "\nComparing each file individually.  To view a summarized report instead, use option -report" unless $opt{quiet};
+        say "\nComparing each file individually.  To view a summarized report instead, use option -report" if $opt{verbose};
         if ( $defaults{openMultipleGUIs} ) {
-            say "Opening multiple GUI at once.  To change this behavior, add this inside your ~/.$scriptName.defaults file:    openMultipleGUIs: 0\n" unless $opt{quiet};
+            say "Opening multiple GUI at once.  To change this behavior, add this inside your ~/.$scriptName.defaults file:    openMultipleGUIs: 0\n" if $opt{verbose};
         } else {
             if ( scalar @files > 1 ) {
-                say "Opening only one GUI at a time.  To change this behavior, add this inside your ~/.$scriptName.defaults file:    openMultipleGUIs: 1\n" unless $opt{quiet};
+                say "Opening only one GUI at a time.  To change this behavior, add this inside your ~/.$scriptName.defaults file:    openMultipleGUIs: 1\n" if $opt{verbose};
             }
         }
         d '@files';
@@ -1079,14 +1087,14 @@ if ( $scms{Perforce} or $scms{SVN} or $scms{GIT} ) {
             # dif file#123  => dif file#123 file
             # dif file#head => dif file#head file
             my $nonrevp4file = $1;
-            say "2nd file will be $nonrevp4file" unless $opt{quiet};
+            say "2nd file will be $nonrevp4file" if $opt{verbose};
             push @files, $nonrevp4file;
             $foundVCSfile = 1;
         } else {
             # If only one file was specified, compare to the head rev
             # dif file      => dif file#head file
             if ( -e $files[0] ) {
-                say "1st file will be $files[0]#head" unless $opt{quiet};
+                say "1st file will be $files[0]#head" if $opt{verbose};
                 $files[1]     = "$files[0]";
                 $files[0]     = "$files[0]#head";
                 $foundVCSfile = 1;
@@ -1306,7 +1314,7 @@ if ( $opt{report} ) {
     $tmpfileReport2 = "/tmp/" . $tmpfileReport2;
     open( my $REPORT2, ">", $tmpfileReport2 ) or die "ERROR: Cannot open file for writing:  $tmpfileReport2\n\n";
     d '$dir1 dir2 $tmpfileReport1 $tmpfileReport2';
-    say "Generating reports with file sizes and md5sums at $tmpfileReport1 and $tmpfileReport2" unless $opt{quiet};
+    say "Generating reports with file sizes and md5sums at $tmpfileReport1 and $tmpfileReport2" if $opt{verbose};
     my @mismatches;
     printf $REPORT1 "%10s  %32s  %s\n", 'SIZE', 'MD5SUM', 'FILENAME';
     printf $REPORT2 "%10s  %32s  %s\n", 'SIZE', 'MD5SUM', 'FILENAME';
@@ -1321,7 +1329,7 @@ if ( $opt{report} ) {
             $tmpfile1 = determineTmpFilename( $file1, $count );
             preprocessFile( $file1, $tmpfile1, $count % 2 );    # %2 for -start2 -stop2
             $size1 = sprintf( "%10s", -s $tmpfile1 );
-            chomp( $md5sum1 = `md5sum $tmpfile1 2> /dev/null` );
+            chomp( $md5sum1 = `$md5sum_tool $tmpfile1 2> /dev/null` );
             $md5sum1 =~ s/^(\S+).*/$1/;
         } else {
             $size1 = sprintf( "%10s", "" );
@@ -1332,7 +1340,7 @@ if ( $opt{report} ) {
             $tmpfile2 = determineTmpFilename( $file2, $count );
             preprocessFile( $file2, $tmpfile2, $count % 2 );    # %2 for -start2 -stop2
             $size2 = sprintf( "%10s", -s $tmpfile2 );
-            chomp( $md5sum2 = `md5sum $tmpfile2 2> /dev/null` );
+            chomp( $md5sum2 = `$md5sum_tool $tmpfile2 2> /dev/null` );
             $md5sum2 =~ s/^(\S+).*/$1/;
         } else {
             $size2 = sprintf( "%10s", "" );
@@ -1364,7 +1372,7 @@ if ( $opt{report} ) {
     # The exit statuses below are used in regressions
     d '@mismatches';
     if (@mismatches) {
-        say "Found " . scalar(@mismatches) . " mismatching pairs of files" unless $opt{quiet};
+        say "Found " . scalar(@mismatches) . " mismatching pairs of files" if $opt{verbose};
     } else {
         say "All file pairs match" unless $opt{quiet};
         exit 0;
@@ -1421,7 +1429,7 @@ if ( !defined $files[1] and not $opt{stdout} ) {
 # Check if files/directories are identical
 my $processedFiles = join " ", @processedFiles;
 d '$processedFiles';
-say "Comparing with $zipDiff..." if scalar(@files) == 2 and not $opt{quiet};
+say "Comparing with $zipDiff..." if scalar(@files) == 2 and $opt{verbose};
 if ( scalar(@files) == 2 and not -d $files[0] and not $opt{stdout} ) {
     d 'doing a diff';
     system("$zipDiff $processedFiles > /dev/null");
@@ -1438,12 +1446,14 @@ if ( scalar(@files) == 2 and not -d $files[0] and not $opt{stdout} ) {
             say "md5sum  $status1  $localFiles[0]"   if $opt{verbose};
             say "md5sum  $status2  $localFiles[1]\n" if $opt{verbose};
         } else {
-            say "These files are identical.  Exiting.\n" unless $opt{quiet};
+            say "These files are identical.  Exiting.\n" if $opt{verbose};
         }
         exit 0;
     }
 }
-say "Opening $gui GUI..." if scalar(@files) == 2 and not $opt{quiet};
+say "Opening $gui GUI..." if scalar(@files) == 2 and $opt{verbose};
+say $to_print if scalar(@files) == 2 and $opt{filenames};
+$to_print='';
 
 # Use gvimdiff instead of meld or kompare once the file size reaches a limit
 if ( $gui =~ /meld|kompare/ ) {
@@ -1599,9 +1609,9 @@ sub preprocessFile {
         }
         open( $F, "$zipCat $file $preprocess_pipe |" ) or die "ERROR: Cannot open file for reading:  $file\n\n";
     }
-    if ( $opt{verbose} ) {
+    if ( $opt{verbose} || $opt{filenames} ) {
         say "\n\n\n" if $opt{gold};    # To visually separate the diffs
-        say "Preprocessing $file";
+        $to_print.="Preprocessing $file   ";
     }
     my $wc = "?";
     $wc = `$zipCat $file | wc -l | cut -d " " -f 1` if $opt{tail};
@@ -2067,9 +2077,9 @@ sub runFileFind {
     $excludeRegex =~ s/^\*/.*/ if defined $excludeRegex;    # *.pyc to .*.pyc
     my @foundFiles;
     if ( defined $excludeRegex ) {
-        say "Searching recursively in '$dir' for files matching /$findRegex/ and not matching /$excludeRegex/" unless $opt{quiet};
+        say "Searching recursively in '$dir' for files matching /$findRegex/ and not matching /$excludeRegex/" if $opt{verbose};
     } else {
-        say "Searching recursively in '$dir' for files matching /$findRegex/" unless $opt{quiet};
+        say "Searching recursively in '$dir' for files matching /$findRegex/" if $opt{verbose};
     }
     find(
         sub {
@@ -2090,9 +2100,9 @@ sub runFileFind {
     );
     my $numFiles = scalar(@foundFiles);
     if ($numFiles) {
-        say "Found $numFiles files" unless $opt{quiet};
+        say "Found $numFiles files" if $opt{verbose};
     } else {
-        say "Ensure that the files exist and the -includeFiles <regex> expression '$opt{includeFiles}' is a valid Perl regex (for example use .* instead of *)" unless $opt{quiet};
+        say "Ensure that the files exist and the -includeFiles <regex> expression '$opt{includeFiles}' is a valid Perl regex (for example use .* instead of *)" if $opt{verbose};
         exit 0;
     }
     d '@foundFiles';
